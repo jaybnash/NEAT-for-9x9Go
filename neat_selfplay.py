@@ -23,6 +23,9 @@ def eval_genomes(genomes, config):
     global generation_num
     if generation_num % 50 == 0 and generation_num > 0:
         batch_size = 10
+        save = False
+    elif generation_num-1 % 50 == 0:
+        batch_size = 1
         save = True
     else:
         save = False
