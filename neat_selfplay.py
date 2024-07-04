@@ -5,6 +5,10 @@ import jax.numpy as jnp
 import pgx
 import neat
 import numpy as np
+import random
+
+global generation_num
+generation_num = 0
 
 # Define the environment initialization and step functions
 def create_env():
@@ -15,37 +19,67 @@ def create_env():
     return env, init, step
 
 # Function to evaluate individual (this is the main function called by NEAT)
-def eval_genome(genome, config):
-    net = neat.nn.FeedForwardNetwork.create(genome, config) # Create network from NEAT genome
+def eval_genomes(genomes, config):
+    global generation_num
+    if generation_num % 50 == 0 and generation_num > 0:
+        batch_size = 10
+        save = True
+    else:
+        save = False
+        batch_size = 1
+    generation_num += 1
+    random.shuffle(genomes)  # Shuffle genomes to ensure random pairing
+
+    for i in range(0, len(genomes), 2):
+        genome_id_1, genome_1 = genomes[i]
+        genome_id_2, genome_2 = genomes[i + 1]
+        genome_1.fitness, genome_2.fitness = eval_genome_vs_genome(genome_1, genome_2, config, batch_size, save)
+        if save:
+            save = False
+
+def eval_genome_vs_genome(genome1, genome2, config, batch_size, save_match):
+    net1 = neat.nn.FeedForwardNetwork.create(genome1, config)
+    net2 = neat.nn.FeedForwardNetwork.create(genome2, config)
     env, init, step = create_env()
-    batch_size = 4 # Batch size is how many games are played per genome evaluation
     keys = jax.random.split(jax.random.PRNGKey(42), batch_size)
     state = init(keys)
-    total_reward = 0
+    genome1_reward = 0
+    genome2_reward = 0
+    if save_match:
+        states = [state]
 
-    while not (state.terminated | state.truncated).all(): # The state is actually a batch of states, therefore the .all
-        # State observation to numpy, dunno why I need to do this
+    while not (state.terminated | state.truncated).all():
         observations = np.array(state.observation)
-        # observation state is N * N * 17 in size
         legal_actions = np.array(state.legal_action_mask)
-        # action space is N * N + 1 in size
+        actions = []
 
-        actions = [] # Actions must also be batched since we are batching the states
-        for obs, legal in zip(observations, legal_actions):
-            # This is a dumb way to do this, why tf are we batching just to use zip??
-            # The docs imply we don't need to but I didn't have much luck, this works fine
-            output = net.activate(obs.flatten().tolist())  # Flatten observations to NEAT input
-            action = np.argmax(output * legal)  # Mask illegal actions
-            actions.append(action)  # Append action to batch actions
+        for i, (obs, legal) in enumerate(zip(observations, legal_actions)):
+            if i % 2 == 0:
+                output = net1.activate(obs.flatten().tolist())
+            else:
+                output = net2.activate(obs.flatten().tolist())
+            action = np.argmax(output * legal)
+            actions.append(action)
 
-        actions = np.array(actions)  # ¯\_(ツ)_/¯
-        state = step(state, actions)  # state.rewards with shape (batch_size, 2)
-        total_reward += jnp.sum(state.rewards)  # Sum state rewards to total rewards
-        # Note that state rewards are only either 1, -1, or 0, win/lose/game-ongoing
+        actions = np.array(actions)
+        state = step(state, actions)
+        if save_match:
+            states.append(state)
+        rewards = state.rewards
 
-    # Combine total reward and intermediate scores for final fitness
-    final_score = int(total_reward)
-    return final_score
+        genome1_reward += jnp.sum(rewards[:, 0])
+        genome2_reward += jnp.sum(rewards[:, 1])
+
+    if save_match:
+        global generation_num
+        pgx.save_svg_animation(states, f"{generation_num}_game.svg", frame_duration_seconds=0.2)
+
+    if genome1_reward > genome2_reward:
+        return 1, 0
+    elif genome2_reward > genome1_reward:
+        return 0, 1
+    else:
+        return 0.5, 0.5
 
 # Define the NEAT configuration
 def run_neat(config_file):
@@ -60,14 +94,8 @@ def run_neat(config_file):
     stats = neat.StatisticsReporter()
     p.add_reporter(stats)
     p.add_reporter(neat.Checkpointer(5))  # Records a checkpoint every X generations
-
-    winner = p.run(eval_genomes, 50)  # Runs NEAT for X generations, using eval_genomes as the fitness function
-
+    winner = p.run(eval_genomes, 500)
     print('\nBest genome:\n{!s}'.format(winner))  # Prints the best genome at end of training... not super helpful
-
-def eval_genomes(genomes, config):
-    for genome_id, genome in genomes:
-        genome.fitness = eval_genome(genome, config)
 
 if __name__ == '__main__':
     run_neat('neat_config.txt')  # Options for NEAT are stored in a .txt file for some reason
