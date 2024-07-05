@@ -8,6 +8,7 @@ import pgx
 import neat
 import numpy as np
 import random
+import pickle
 from NEATOverwrites import Reproduction
 
 global generation_num
@@ -30,7 +31,7 @@ def eval_genomes(genomes, config):
     new_bias = False
     save = False
     test_best = False
-    if generation_num % 1 == 200 and generation_num > 0:
+    if generation_num % 1 == 100 and generation_num > 0:
         new_bias = True
         test_best = True
     elif (generation_num-1) % 50 == 0:
@@ -48,16 +49,13 @@ def eval_genomes(genomes, config):
             genome_2.fitness += float(fit_2)
         for genome_id, genome in genomes:
             genome.bias = genome.fitness
-            print(genome.bias)
     else:
         for i in range(0, len(genomes), 2):
             genome_id_1, genome_1 = genomes[i]
             genome_id_2, genome_2 = genomes[i + 1]
             fit_1, fit_2 = eval_genome_vs_genome(genome_1, genome_2, config, save)
             genome_1.fitness = float(fit_1 * genome_1.bias)
-            print(genome_1.bias)
             genome_2.fitness = float(fit_2 * genome_2.bias)
-            print(genome_2.bias)
             if save:
                 save = False
     if test_best:
@@ -92,6 +90,8 @@ def eval_genome_vs_baseline(genome1, config):
         genome1_reward += jnp.sum(rewards[:, 0])
         baseline_reward += jnp.sum(rewards[:, 1])
     global generation_num
+    with open(f"{generation_num}_genome.pkl", 'wb') as file:
+        pickle.dump(genome1, file)
     if genome1_reward > baseline_reward:
         pgx.save_svg_animation(states, f"{generation_num}_trial_WIN.svg", frame_duration_seconds=0.2)
     else:
@@ -153,7 +153,7 @@ def run_neat(config_file):
     stats = neat.StatisticsReporter()
     p.add_reporter(stats)
     p.add_reporter(neat.Checkpointer(50))  # Records a checkpoint every X generations
-    winner = p.run(eval_genomes, 500)
+    winner = p.run(eval_genomes, 600)
     print('\nBest genome:\n{!s}'.format(winner))  # Prints the best genome at end of training... not super helpful
 
 if __name__ == '__main__':
