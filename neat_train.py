@@ -35,7 +35,7 @@ def eval_genomes(genomes, config):
 
     #if generation_num % 50 == 0 and generation_num > 0:
         #new_bias = True
-    #elif (generation_num-1) % 50 == 0 and generation_num > 0:
+    #elif (generation_num+1) % 50 == 0 and generation_num > 0:
         #save = True
         #test_best = True
 
