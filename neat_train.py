@@ -30,14 +30,14 @@ def eval_genomes(genomes, config):
             genome.bias = 1
 
     new_bias = False
-    save = False
-    test_best = False
+    save = True
+    test_best = True
 
-    if generation_num % 50 == 0 and generation_num > 0:
-        new_bias = True
-    elif (generation_num-1) % 50 == 0 and generation_num > 0:
-        save = True
-        test_best = True
+    #if generation_num % 50 == 0 and generation_num > 0:
+        #new_bias = True
+    #elif (generation_num-1) % 50 == 0 and generation_num > 0:
+        #save = True
+        #test_best = True
 
     indices = list(range(len(genomes)))  # Create a list of indices
     random.shuffle(indices)  # Shuffle the indices to ensure random pairing
@@ -99,12 +99,12 @@ def eval_genome_vs_baseline(genome1, config):
         genome1_reward += jnp.sum(rewards[:, 0])
         baseline_reward += jnp.sum(rewards[:, 1])
     global generation_num
-    with open(f"{generation_num}_genome.pkl", 'wb') as file:
+    with open(f"./data/trial/{generation_num}_genome.pkl", 'wb') as file:
         pickle.dump(genome1, file)
     if genome1_reward > baseline_reward:
-        pgx.save_svg_animation(states, f"{generation_num}_trial_WIN.svg", frame_duration_seconds=0.2)
+        pgx.save_svg_animation(states, f"./data/trial/{generation_num}_trial_WIN.svg", frame_duration_seconds=0.2)
     else:
-        pgx.save_svg_animation(states, f"{generation_num}_trial_LOSS.svg", frame_duration_seconds=0.2)
+        pgx.save_svg_animation(states, f"./data/trial/{generation_num}_trial_LOSS.svg", frame_duration_seconds=0.2)
 
 def eval_genome_vs_genome(genome1, genome2, config, save_match):
     net1 = neat.nn.FeedForwardNetwork.create(genome1, config)
@@ -139,9 +139,9 @@ def eval_genome_vs_genome(genome1, genome2, config, save_match):
         genome1_reward += jnp.sum(rewards[:, 0])
         genome2_reward += jnp.sum(rewards[:, 1])
 
-    if save_match:
+    if save_match and batch_size == 1:
         global generation_num
-        pgx.save_svg_animation(states, f"{generation_num}_game.svg", frame_duration_seconds=0.2)
+        pgx.save_svg_animation(states, f"./data/game/{generation_num}_game.svg", frame_duration_seconds=0.2)
     if genome1_reward > genome2_reward:
         return 1, 0
     elif genome2_reward > genome1_reward:
@@ -156,12 +156,18 @@ def run_neat(config_file):
                          neat.DefaultSpeciesSet, neat.DefaultStagnation,
                          config_file)
 
-    p = neat.Population(config)  # Makes a population
+    try:
+        p = neat.Checkpointer.restore_checkpoint('data/restore_point.pkl')
+        #best_genome = p.best_genome
+        #eval_genome_vs_baseline(best_genome, config)
+    except Exception as e:
+        print(e)
+        p = neat.Population(config)  # Makes a population
 
     p.add_reporter(neat.StdOutReporter(True))
     stats = neat.StatisticsReporter()
     p.add_reporter(stats)
-    p.add_reporter(neat.Checkpointer(50))  # Records a checkpoint every X generations
+    p.add_reporter(neat.Checkpointer(50, filename_prefix="./data/checkpoints/"))  # Records a checkpoint every X generations
     winner = p.run(eval_genomes, 600)
     print('\nBest genome:\n{!s}'.format(winner))  # Prints the best genome at end of training... not super helpful
 
