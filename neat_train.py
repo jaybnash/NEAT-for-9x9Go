@@ -30,14 +30,14 @@ def eval_genomes(genomes, config):
             genome.bias = 1
 
     new_bias = False
-    save = True
-    test_best = True
+    save = False
+    test_best = False
 
-    #if generation_num % 50 == 0 and generation_num > 0:
-        #new_bias = True
-    #elif (generation_num+1) % 50 == 0 and generation_num > 0:
-        #save = True
-        #test_best = True
+    if generation_num % 50 == 0 and generation_num > 0:
+        new_bias = True
+    elif (generation_num+1) % 50 == 0 and generation_num > 0:
+        save = True
+        test_best = True
 
     indices = list(range(len(genomes)))  # Create a list of indices
     random.shuffle(indices)  # Shuffle the indices to ensure random pairing
