@@ -41,10 +41,9 @@ def eval_genomes(genomes, config):
 
     indices = list(range(len(genomes)))  # Create a list of indices
     random.shuffle(indices)  # Shuffle the indices to ensure random pairing
-
+    for genome_id, genome in genomes:
+        genome.fitness = 0
     if new_bias:
-        for genome_id, genome in genomes:
-            genome.fitness = 0
         genome_pairs = list(combinations(indices, 2))  # Use shuffled indices for combinations
         for idx1, idx2 in genome_pairs:
             genome_id_1, genome_1 = genomes[idx1]
@@ -55,15 +54,17 @@ def eval_genomes(genomes, config):
         for genome_id, genome in genomes:
             genome.bias = genome.fitness
     else:
-        for i in range(0, len(genomes), 2):
-            idx1, idx2 = indices[i], indices[i + 1]  # Use shuffled indices for pairing
-            genome_id_1, genome_1 = genomes[idx1]
-            genome_id_2, genome_2 = genomes[idx2]
-            fit_1, fit_2 = eval_genome_vs_genome(genome_1, genome_2, config, save)
-            genome_1.fitness = float(fit_1 * genome_1.bias)
-            genome_2.fitness = float(fit_2 * genome_2.bias)
-            if save:
-                save = False
+        for i in range(3):
+            for i in range(0, len(genomes), 2):
+                idx1, idx2 = indices[i], indices[i + 1]  # Use shuffled indices for pairing
+                genome_id_1, genome_1 = genomes[idx1]
+                genome_id_2, genome_2 = genomes[idx2]
+                fit_1, fit_2 = eval_genome_vs_genome(genome_1, genome_2, config, save)
+                genome_1.fitness += float(fit_1 * genome_1.bias)
+                genome_2.fitness += float(fit_2 * genome_2.bias)
+                if save:
+                    save = False
+            random.shuffle(indices)
 
     if test_best:
         best_genome = None
