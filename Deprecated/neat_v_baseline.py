@@ -108,4 +108,4 @@ def eval_genomes(genomes, config):
         genome.fitness = eval_genome(genome, config)
 
 if __name__ == '__main__':
-    run_neat('neat_config.txt')  # Options for NEAT are stored in a .txt file for some reason
+    run_neat('../neat_config.txt')  # Options for NEAT are stored in a .txt file for some reason
