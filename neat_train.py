@@ -1,7 +1,7 @@
 import os
 from itertools import combinations
 
-os.environ['JAX_PLATFORMS'] = 'cpu' # This is bc I'm using my GPUs for xpilot, REMOVE THIS
+os.environ['JAX_PLATFORMS'] = 'cpu'  # Remove this if not needed
 import jax
 import jax.numpy as jnp
 import pgx
@@ -16,13 +16,13 @@ generation_num = 0
 
 # Define the environment initialization and step functions
 def create_env():
-    # 19x19 is unbearably slow lol
+    # 19x19 is unbearably slow
     env = pgx.make("go_9x9")
     init = jax.jit(jax.vmap(env.init))
     step = jax.jit(jax.vmap(env.step))
     return env, init, step
 
-# Function to evaluate individual (this is the main function called by NEAT)
+# Function to evaluate genomes in batches
 def eval_genomes(genomes, config):
     global generation_num
     if generation_num == 0:
@@ -33,38 +33,50 @@ def eval_genomes(genomes, config):
     save = False
     test_best = False
 
-    if generation_num % 50 == 0 and generation_num > 0:
+    if generation_num % 50 == 0 and generation_num != 0:
         new_bias = True
-    elif (generation_num+1) % 50 == 0 and generation_num > 0:
-        save = True
         test_best = True
 
-    indices = list(range(len(genomes)))  # Create a list of indices
-    random.shuffle(indices)  # Shuffle the indices to ensure random pairing
+    indices = list(range(len(genomes)))
+    random.shuffle(indices)
     for genome_id, genome in genomes:
         genome.fitness = 0
+
+    batch_size = 64  # Adjust the batch size as needed
+
     if new_bias:
-        genome_pairs = list(combinations(indices, 2))  # Use shuffled indices for combinations
-        for idx1, idx2 in genome_pairs:
-            genome_id_1, genome_1 = genomes[idx1]
-            genome_id_2, genome_2 = genomes[idx2]
-            fit_1, fit_2 = eval_genome_vs_genome(genome_1, genome_2, config, save)
-            genome_1.fitness += float(fit_1)
-            genome_2.fitness += float(fit_2)
+        genome_pairs = list(combinations(indices, 2))
+        random.shuffle(genome_pairs)
+        for i in range(0, len(genome_pairs), batch_size):
+            genome_pairs_batch_indices = genome_pairs[i:i + batch_size]
+            genome_pairs_batch = []
+            for idx1, idx2 in genome_pairs_batch_indices:
+                genome_id_1, genome_1 = genomes[idx1]
+                genome_id_2, genome_2 = genomes[idx2]
+                genome_pairs_batch.append((genome_1, genome_2))
+            fit_1_list, fit_2_list = eval_genome_vs_genome_batch(genome_pairs_batch, config)
+            for (genome_1, genome_2), fit_1, fit_2 in zip(genome_pairs_batch, fit_1_list, fit_2_list):
+                genome_1.fitness += float(fit_1)
+                genome_2.fitness += float(fit_2)
         for genome_id, genome in genomes:
             genome.bias = genome.fitness
     else:
-        for i in range(3):
-            for i in range(0, len(genomes), 2):
-                idx1, idx2 = indices[i], indices[i + 1]  # Use shuffled indices for pairing
-                genome_id_1, genome_1 = genomes[idx1]
-                genome_id_2, genome_2 = genomes[idx2]
-                fit_1, fit_2 = eval_genome_vs_genome(genome_1, genome_2, config, save)
-                genome_1.fitness += float(fit_1 * genome_1.bias)
-                genome_2.fitness += float(fit_2 * genome_2.bias)
-                if save:
-                    save = False
+        for _ in range(3):
             random.shuffle(indices)
+            for i in range(0, len(indices) - 1, 2 * batch_size):
+                batch_indices = indices[i:i + 2 * batch_size]
+                genome_pairs_batch = []
+                for j in range(0, len(batch_indices) - 1, 2):
+                    idx1, idx2 = batch_indices[j], batch_indices[j + 1]
+                    genome_id_1, genome_1 = genomes[idx1]
+                    genome_id_2, genome_2 = genomes[idx2]
+                    genome_pairs_batch.append((genome_1, genome_2))
+                fit_1_list, fit_2_list = eval_genome_vs_genome_batch(genome_pairs_batch, config)
+                for (genome_1, genome_2), fit_1, fit_2 in zip(genome_pairs_batch, fit_1_list, fit_2_list):
+                    genome_1.fitness += float(fit_1 * genome_1.bias)
+                    genome_2.fitness += float(fit_2 * genome_2.bias)
+                    if save:
+                        save = False
 
     if test_best:
         best_genome = None
@@ -102,75 +114,83 @@ def eval_genome_vs_baseline(genome1, config):
     global generation_num
     with open(f"./data/trial/{generation_num}_genome.pkl", 'wb') as file:
         pickle.dump(genome1, file)
-    if genome1_reward > baseline_reward:
+    if genome1_reward >= baseline_reward:
         pgx.save_svg_animation(states, f"./data/trial/{generation_num}_trial_WIN.svg", frame_duration_seconds=0.2)
     else:
         pgx.save_svg_animation(states, f"./data/trial/{generation_num}_trial_LOSS.svg", frame_duration_seconds=0.2)
 
-def eval_genome_vs_genome(genome1, genome2, config, save_match):
-    net1 = neat.nn.FeedForwardNetwork.create(genome1, config)
-    net2 = neat.nn.FeedForwardNetwork.create(genome2, config)
+def eval_genome_vs_genome_batch(genome_pairs_batch, config):
+    batch_size = len(genome_pairs_batch)
+    net1_list = []
+    net2_list = []
+    for genome1, genome2 in genome_pairs_batch:
+        net1 = neat.nn.FeedForwardNetwork.create(genome1, config)
+        net2 = neat.nn.FeedForwardNetwork.create(genome2, config)
+        net1_list.append(net1)
+        net2_list.append(net2)
+
     env, init, step = create_env()
-    batch_size = 1
     keys = jax.random.split(jax.random.PRNGKey(42), batch_size)
     state = init(keys)
-    genome1_reward = 0
-    genome2_reward = 0
-    if save_match:
-        states = [state]
+    genome1_rewards = np.zeros(batch_size)
+    genome2_rewards = np.zeros(batch_size)
 
     while not (state.terminated | state.truncated).all():
         observations = np.array(state.observation)
         legal_actions = np.array(state.legal_action_mask)
         actions = []
 
-        for i, (obs, legal) in enumerate(zip(observations, legal_actions)):
-            if i % 2 == 0:
-                output = net1.activate(obs.flatten().tolist())
+        for i in range(batch_size):
+            obs = observations[i]
+            legal = legal_actions[i]
+            if state.current_player[i] == 0:
+                output = net1_list[i].activate(obs.flatten().tolist())
             else:
-                output = net2.activate(obs.flatten().tolist())
+                output = net2_list[i].activate(obs.flatten().tolist())
             action = np.argmax(output * legal)
             actions.append(action)
 
         actions = np.array(actions)
         state = step(state, actions)
-        if save_match:
-            states.append(state)
-        rewards = state.rewards
-        genome1_reward += jnp.sum(rewards[:, 0])
-        genome2_reward += jnp.sum(rewards[:, 1])
+        rewards = np.array(state.rewards)
+        genome1_rewards += rewards[:, 0]
+        genome2_rewards += rewards[:, 1]
 
-    if save_match and batch_size == 1:
-        global generation_num
-        pgx.save_svg_animation(states, f"./data/game/{generation_num}_game.svg", frame_duration_seconds=0.2)
-    if genome1_reward > genome2_reward:
-        return 1, 0
-    elif genome2_reward > genome1_reward:
-        return 0, 1
-    else:
-        return 0.5, 0.5
+    fit_1_list = []
+    fit_2_list = []
+    for i in range(batch_size):
+        if genome1_rewards[i] > genome2_rewards[i]:
+            fit_1_list.append(1)
+            fit_2_list.append(0)
+        elif genome2_rewards[i] > genome1_rewards[i]:
+            fit_1_list.append(0)
+            fit_2_list.append(1)
+        else:
+            fit_1_list.append(0.5)
+            fit_2_list.append(0.5)
+
+    return fit_1_list, fit_2_list
 
 # Define the NEAT configuration
 def run_neat(config_file):
-    # Literally everything abt the NEAT algorithm is default, except the input/outputs sizes to fit the go space
     config = neat.Config(neat.DefaultGenome, Reproduction.OverwriteReproduction,
                          neat.DefaultSpeciesSet, neat.DefaultStagnation,
                          config_file)
 
     try:
         p = neat.Checkpointer.restore_checkpoint('data/restore_point.pkl')
-        #best_genome = p.best_genome
-        #eval_genome_vs_baseline(best_genome, config)
     except Exception as e:
         print(e)
-        p = neat.Population(config)  # Makes a population
+        p = neat.Population(config)  # Create a new population
 
     p.add_reporter(neat.StdOutReporter(True))
     stats = neat.StatisticsReporter()
     p.add_reporter(stats)
-    p.add_reporter(neat.Checkpointer(50, filename_prefix="./data/checkpoints/"))  # Records a checkpoint every X generations
-    winner = p.run(eval_genomes, 600)
-    print('\nBest genome:\n{!s}'.format(winner))  # Prints the best genome at end of training... not super helpful
+    p.add_reporter(neat.Checkpointer(generation_interval=50, time_interval_seconds=None,
+                                     filename_prefix="./data/checkpoints/"))
+    winner = p.run(eval_genomes, 10000)
+    print('\nBest genome:\n{!s}'.format(winner))
 
 if __name__ == '__main__':
-    run_neat('neat_config.txt')  # Options for NEAT are stored in a .txt file for some reason
+    run_neat('neat_config.txt')
+
