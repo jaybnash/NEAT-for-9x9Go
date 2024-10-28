@@ -42,7 +42,7 @@ def eval_genomes(genomes, config):
     for genome_id, genome in genomes:
         genome.fitness = 0
 
-    batch_size = 64  # Adjust the batch size as needed
+    batch_size = 256  # Adjust the batch size as needed
 
     if new_bias:
         genome_pairs = list(combinations(indices, 2))
