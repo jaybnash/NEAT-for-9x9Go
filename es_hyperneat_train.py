@@ -85,7 +85,7 @@ def eval_genomes(genomes, config):
     save = False
     test_best = False
 
-    if generation_num % 50 == 0 and generation_num != 0:
+    if generation_num % 100 == 0 and generation_num != 0:
         new_bias = True
         test_best = True
 
@@ -94,7 +94,7 @@ def eval_genomes(genomes, config):
     for genome_id, genome in genomes:
         genome.fitness = 0
 
-    batch_size = 256  # Adjust the batch size as needed
+    batch_size = 128  # Adjust the batch size as needed
 
     if new_bias:
         genome_pairs = list(combinations(indices, 2))
@@ -150,79 +150,41 @@ def eval_genome_vs_baseline(genome1, config):
     model_id = 'go_9x9_v0'
     model = pgx.make_baseline_model(model_id)
     env, init, step = create_env()
-
-    total_genome1_reward = 0
-    total_baseline_reward = 0
-
-    games_states = []  # To store all games' states and results
-    winning_game_states = None  # To store the first winning game's states
-
-    for game_index in range(4):
-        # Decide which player genome1 will be
-        if game_index % 2 == 0:
-            # genome1 plays as black (player 0)
-            genome1_player = 0
-            baseline_player = 1
+    batch_size = 1
+    keys = jax.random.split(jax.random.PRNGKey(42), batch_size)
+    state = init(keys)
+    genome1_reward = 0
+    baseline_reward = 0
+    states = [state]
+    while not (state.terminated | state.truncated).all():
+        observations = np.array(state.observation)
+        legal_actions = np.array(state.legal_action_mask)
+        obs = observations[0]
+        legal = legal_actions[0]
+        obs_simplified = parse_observation(obs)
+        if state.current_player[0] == 1:
+            output = phenotype_net.activate(obs_simplified.tolist())
+            output = np.array(output)
+            action_A = np.argmax(output * legal)
+            action_B = None
         else:
-            # genome1 plays as white (player 1)
-            genome1_player = 1
-            baseline_player = 0
-
-        batch_size = 1
-        keys = jax.random.split(jax.random.PRNGKey(42 + game_index), batch_size)
-        state = init(keys)
-        # Set the starting player accordingly
-        if genome1_player == 1:
-            # We need to set state.current_player to 1
-            state = state.replace(current_player=jnp.array([1], dtype=jnp.int8))
-
-        genome1_reward = 0
-        baseline_reward = 0
-        states = [state]
-
-        while not (state.terminated | state.truncated).all():
-            observations = np.array(state.observation)
-            legal_actions = np.array(state.legal_action_mask)
-            obs = observations[0]
-            legal = legal_actions[0]
-            obs_simplified = parse_observation(obs)
-            if state.current_player[0] == genome1_player:
-                output = phenotype_net.activate(obs_simplified.tolist())
-                output = np.array(output)
-                action_genome1 = np.argmax(output * legal)
-                action_baseline = None
-            else:
-                logits, value = model(state.observation)
-                action_baseline = logits.argmax(axis=-1)
-                action_genome1 = None
-            action = action_genome1 if action_genome1 is not None else action_baseline[0]
-            actions = np.array([action])
-            state = step(state, actions)
-            states.append(state)
-            rewards = state.rewards
-            genome1_reward += rewards[0, genome1_player]
-            baseline_reward += rewards[0, baseline_player]
-        total_genome1_reward += genome1_reward
-        total_baseline_reward += baseline_reward
-
-        # Store the game states and results
-        games_states.append((states, genome1_reward, baseline_reward))
-
-        # If genome1 wins this game, and we haven't saved a winning game yet
-        if genome1_reward >= baseline_reward and winning_game_states is None:
-            winning_game_states = states
-
+            logits, value = model(state.observation)
+            action_B = logits.argmax(axis=-1)
+            action_A = None
+        action = action_A if action_A is not None else action_B[0]
+        actions = np.array([action])
+        state = step(state, actions)
+        states.append(state)
+        rewards = state.rewards
+        genome1_reward += rewards[0, 0]
+        baseline_reward += rewards[0, 1]
     global generation_num
     with open(f"./data/trial/{generation_num}_genome.pkl", 'wb') as file:
         pickle.dump(genome1, file)
-    if winning_game_states is not None:
-        # Save the first winning game to SVG
-        pgx.save_svg_animation(winning_game_states, f"./data/trial/{generation_num}_trial_WIN.svg", frame_duration_seconds=0.2)
+    if genome1_reward >= baseline_reward:
+        pgx.save_svg_animation(states, f"./data/trial/{generation_num}_trial_WIN.svg", frame_duration_seconds=0.2)
     else:
-        # Save a random game
-        random_game_index = random.randint(0, 3)
-        random_game_states = games_states[random_game_index][0]
-        pgx.save_svg_animation(random_game_states, f"./data/trial/{generation_num}_trial_LOSS.svg", frame_duration_seconds=0.2)
+        pgx.save_svg_animation(states, f"./data/trial/{generation_num}_trial_LOSS.svg", frame_duration_seconds=0.2)
 
 
 def eval_genome_vs_genome_batch(genome_pairs_batch, config):
