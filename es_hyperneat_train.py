@@ -85,7 +85,7 @@ def eval_genomes(genomes, config):
     save = False
     test_best = False
 
-    if generation_num % 100 == 0 and generation_num != 0:
+    if generation_num % 100 == 0 and generation_num == 0:
         new_bias = True
         test_best = True
 
@@ -94,7 +94,7 @@ def eval_genomes(genomes, config):
     for genome_id, genome in genomes:
         genome.fitness = 0
 
-    batch_size = 128  # Adjust the batch size as needed
+    batch_size = 6  # Adjust the batch size as needed
 
     if new_bias:
         genome_pairs = list(combinations(indices, 2))
@@ -160,31 +160,26 @@ def eval_genome_vs_baseline(genome1, config):
         observations = np.array(state.observation)
         legal_actions = np.array(state.legal_action_mask)
         obs = observations[0]
-        legal = legal_actions[0]
+        legal = legal_actions
         obs_simplified = parse_observation(obs)
-        if state.current_player[0] == 1:
-            output = phenotype_net.activate(obs_simplified.tolist())
-            output = np.array(output)
-            action_A = np.argmax(output * legal)
-            action_B = None
-        else:
-            logits, value = model(state.observation)
-            action_B = logits.argmax(axis=-1)
-            action_A = None
-        action = action_A if action_A is not None else action_B[0]
-        actions = np.array([action])
+        output = phenotype_net.activate(obs_simplified.tolist())
+        output = np.array(output)
+        action_A = np.argmax(output * legal)
+        logits, value = model(state.observation)
+        action_B = logits.argmax(axis=-1)
+        actions = jnp.where(state.current_player == 0, action_A, action_B)
         state = step(state, actions)
         states.append(state)
         rewards = state.rewards
-        genome1_reward += rewards[0, 0]
-        baseline_reward += rewards[0, 1]
+        genome1_reward += jnp.sum(rewards[:, 0])
+        baseline_reward += jnp.sum(rewards[:, 1])
     global generation_num
     with open(f"./data/trial/{generation_num}_genome.pkl", 'wb') as file:
         pickle.dump(genome1, file)
     if genome1_reward >= baseline_reward:
-        pgx.save_svg_animation(states, f"./data/trial/{generation_num}_trial_WIN.svg", frame_duration_seconds=0.2)
+        pgx.save_svg_animation(states, f"./data/trial/{generation_num}_trial_WIN.svg", frame_duration_seconds=0.25)
     else:
-        pgx.save_svg_animation(states, f"./data/trial/{generation_num}_trial_LOSS.svg", frame_duration_seconds=0.2)
+        pgx.save_svg_animation(states, f"./data/trial/{generation_num}_trial_LOSS.svg", frame_duration_seconds=0.25)
 
 
 def eval_genome_vs_genome_batch(genome_pairs_batch, config):

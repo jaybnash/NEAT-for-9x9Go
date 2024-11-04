@@ -33,8 +33,9 @@ def eval_genomes(genomes, config):
     save = False
     test_best = False
 
-    if generation_num % 50 == 0 and generation_num != 0:
+    if generation_num % 100 == 0:
         new_bias = True
+    if generation_num % 1000 == 0:
         test_best = True
 
     indices = list(range(len(genomes)))
@@ -42,9 +43,10 @@ def eval_genomes(genomes, config):
     for genome_id, genome in genomes:
         genome.fitness = 0
 
-    batch_size = 256  # Adjust the batch size as needed
+    batch_size = 100  # Adjust the batch size as needed
 
     if new_bias:
+        batch_size = 4950
         genome_pairs = list(combinations(indices, 2))
         random.shuffle(genome_pairs)
         for i in range(0, len(genome_pairs), batch_size):
@@ -98,7 +100,7 @@ def eval_genome_vs_baseline(genome1, config):
     genome1_reward = 0
     baseline_reward = 0
     states = [state]
-    while not (state.terminated | state.truncated).all():
+    while not (state.terminated).all():
         observations = np.array(state.observation)
         legal_actions = np.array(state.legal_action_mask)
         output = net1.activate(observations.flatten().tolist())
@@ -135,7 +137,7 @@ def eval_genome_vs_genome_batch(genome_pairs_batch, config):
     genome1_rewards = np.zeros(batch_size)
     genome2_rewards = np.zeros(batch_size)
 
-    while not (state.terminated | state.truncated).all():
+    while not (state.terminated).all():
         observations = np.array(state.observation)
         legal_actions = np.array(state.legal_action_mask)
         actions = []
@@ -186,9 +188,9 @@ def run_neat(config_file):
     p.add_reporter(neat.StdOutReporter(True))
     stats = neat.StatisticsReporter()
     p.add_reporter(stats)
-    p.add_reporter(neat.Checkpointer(generation_interval=50, time_interval_seconds=None,
+    p.add_reporter(neat.Checkpointer(generation_interval=5000, time_interval_seconds=None,
                                      filename_prefix="./data/checkpoints/"))
-    winner = p.run(eval_genomes, 10000)
+    winner = p.run(eval_genomes, 20000)
     print('\nBest genome:\n{!s}'.format(winner))
 
 if __name__ == '__main__':
